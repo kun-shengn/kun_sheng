@@ -83,7 +83,7 @@ static void TCPClientTask(void)
     IoSetFunc(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_IO_FUNC_GPIO_11_GPIO);
     GpioSetDir(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_GPIO_DIR_IN);
     IoSetPull(WIFI_IOT_IO_NAME_GPIO_11, WIFI_IOT_IO_PULL_DOWN);
-    //CheckHandler();
+    CheckHandler();
     SensorHandler();
     //服务器的地址信息
     struct sockaddr_in send_addr;

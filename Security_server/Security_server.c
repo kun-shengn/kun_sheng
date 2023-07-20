@@ -348,16 +348,6 @@ static void TCPServerTask(void)
     ssd1306_Fill(Black);
     SensorHandler();
 
-
-
-    
-
-
-
-
-
-
-    /*
     int ap_fd;
     int addr_length;
     struct sockaddr_in send_addr;
@@ -375,21 +365,6 @@ static void TCPServerTask(void)
     send_addr.sin_addr.s_addr = inet_addr("192.168.1.1");
     addr_length = sizeof(send_addr);
     connect(ap_fd,(struct sockaddr *)&send_addr, addr_length);
-*/
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
 	g_wifiEventHandler.OnHotspotStaJoin = OnHotspotStaJoinHandler;
     g_wifiEventHandler.OnHotspotStaLeave = OnHotspotStaLeaveHandler;
     g_wifiEventHandler.OnHotspotStateChanged = OnHotspotStateChangedHandler;

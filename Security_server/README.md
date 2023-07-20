@@ -1,7 +1,6 @@
-# BearPi-HM_Nano开发板WiFi编程开发——TCP服务器
-本示例将演示如何在BearPi-HM_Nano开发板上使用socket编程创建TCP服务端，接收客户端消息并回复固定消息。
+# 信标
+本示例将演示如何在BearPi-HM_Nano开发板上使用socket编程创建TCP服务端，接收客户端消息并显示对应数据。
 
-![BearPi-HM_Nano](/applications/BearPi/BearPi-HM_Nano/docs/figures/00_public/BearPi-HM_Nano.png)
 ## socket API分析
 本案例主要使用了以下几个API完socket编程实验
 ## socket()
@@ -68,104 +67,181 @@ send函数用来向TCP连接的另一端发送数据。
 3. 调用 `listen` 接口监听(指定port监听),通知操作系统区接受来自客户端链接请求,第二个参数：指定队列长度
 4. 调用`accept`接口从队列中获得一个客户端的请求链接
 5. 调用 `recv` 接口接收客户端发来的数据
-6. 调用 `send` 接口向客户端回复固定的数据
+6. 调用`TcpClientHandler`方法为每一个新接入设备创建一个socket套接字进行信息传输。 
 
 ```c
 static void TCPServerTask(void)
 {
-	/* 服务端地址信息 */
+
+    WifiIotUartAttribute uart_attr = {
+
+        //baud_rate: 9600
+        .baudRate = 9600,
+
+        //data_bits: 8bits
+        .dataBits = 8,
+        .stopBits = 1,
+        .parity = 0,
+    };
+    uart_ret = UartInit(WIFI_IOT_UART_IDX_1, &uart_attr, NULL);
+    if (uart_ret != WIFI_IOT_SUCCESS)
+    {
+        printf("Failed to init uart! Err code = %d\n", uart_ret);
+        return;
+    }
+    IoSetFunc(WIFI_IOT_IO_NAME_GPIO_13, WIFI_IOT_IO_FUNC_GPIO_13_I2C0_SDA);
+    IoSetFunc(WIFI_IOT_IO_NAME_GPIO_14, WIFI_IOT_IO_FUNC_GPIO_14_I2C0_SCL);
+    I2cInit(WIFI_IOT_I2C_IDX_0, OLED_I2C_BAUDRATE);
+    WatchDogDisable();
+    usleep(20*1000);
+    ssd1306_Init();
+    ssd1306_Fill(Black);
+    SensorHandler();
+    int ap_fd;
+    int addr_length;
+    struct sockaddr_in send_addr;
+    addr_length = sizeof(send_addr);
+    WifiConnect("BearPi", "0987654321");
+    if ((ap_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+    {
+        perror("create socket failed!\r\n");
+        exit(1);
+    }
+
+    //初始化预连接的服务端地址
+    send_addr.sin_family = AF_INET;
+    send_addr.sin_port = htons(_PROT_);
+    send_addr.sin_addr.s_addr = inet_addr("192.168.1.1");
+    addr_length = sizeof(send_addr);
+    connect(ap_fd,(struct sockaddr *)&send_addr, addr_length);
+
+	g_wifiEventHandler.OnHotspotStaJoin = OnHotspotStaJoinHandler;
+    g_wifiEventHandler.OnHotspotStaLeave = OnHotspotStaLeaveHandler;
+    g_wifiEventHandler.OnHotspotStateChanged = OnHotspotStateChangedHandler;
+    error = RegisterWifiEvent(&g_wifiEventHandler);
+    if (error != WIFI_SUCCESS)
+    {
+        printf("RegisterWifiEvent failed, error = %d.\r\n",error);
+		exit(1);
+    }
+    printf("RegisterWifiEvent succeed!\r\n");
+	HotspotConfig config = {0};
+
+    strcpy(config.ssid, AP_SSID);
+    strcpy(config.preSharedKey, AP_PSK);
+    config.securityType = WIFI_SEC_TYPE_PSK;
+    config.band = HOTSPOT_BAND_TYPE_2G;
+    config.channelNum = 7;
+
+    error = SetHotspotConfig(&config);
+    if (error != WIFI_SUCCESS)
+    {
+        printf("SetHotspotConfig failed, error = %d.\r\n", error);
+        exit(1);
+    }
+    printf("SetHotspotConfig succeed!\r\n");
+
+    //启动wifi热点模式
+    error = EnableHotspot(); 
+    if (error != WIFI_SUCCESS)
+    {
+        printf("EnableHotspot failed, error = %d.\r\n", error);
+        exit(1);
+    }
+    printf("EnableHotspot succeed!\r\n");
+
+    //检查热点模式是否使能
+    if (IsHotspotActive() == WIFI_HOTSPOT_NOT_ACTIVE)
+    {
+        printf("Wifi station is not actived.\r\n");
+        exit(1);
+    }
+    printf("Wifi station is actived!\r\n");
+
+    //启动dhcp
+    g_lwip_netif = netifapi_netif_find("ap0");
+    if (g_lwip_netif) 
+    {
+        ip4_addr_t bp_gw;
+        ip4_addr_t bp_ipaddr;
+        ip4_addr_t bp_netmask;
+
+        IP4_ADDR(&bp_gw, 192, 168, 1, 1);           /* input your gateway for example: 192.168.1.1 */
+        IP4_ADDR(&bp_ipaddr, 192, 168, 1, 1);       /* input your IP for example: 192.168.1.1 */
+        IP4_ADDR(&bp_netmask, 255, 255, 255, 0);    /* input your netmask for example: 255.255.255.0 */
+
+        err_t ret = netifapi_netif_set_addr(g_lwip_netif, &bp_ipaddr, &bp_netmask, &bp_gw);
+        if(ret != ERR_OK)
+        {
+            printf("netifapi_netif_set_addr failed, error = %d.\r\n", ret);
+            exit(1);
+        }
+        printf("netifapi_netif_set_addr succeed!\r\n");
+
+        ret = netifapi_dhcps_start(g_lwip_netif, 0, 0);
+        if(ret != ERR_OK)
+        { 
+            printf("netifapi_dhcp_start failed, error = %d.\r\n", ret);
+            exit(1);
+        }
+        printf("netifapi_dhcps_start succeed!\r\n");
+
+    }
+
+	//服务端地址信息
 	struct sockaddr_in server_sock;
-	/* 客户端地址信息 */
-	struct sockaddr_in client_sock;
-	int sin_size;
+    int sin_size;
 
-	struct sockaddr_in *cli_addr;
-    /* 连接Wifi */
-    WifiConnect("TP-LINK_65A8","0987654321");
-
-
-    /**
-    * 1.创建socket
-    * AF_INET:ipv4
-    * SOCK_STRAM:tcp协议
-    */
-	if((sock_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+	//创建socket
+	if ((sock_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
 	{
 		perror("socket is error\r\n");
 		exit(1);
 	}
 
-	bzero(&server_sock,sizeof(server_sock));
+	bzero(&server_sock, sizeof(server_sock));
 	server_sock.sin_family = AF_INET;
 	server_sock.sin_addr.s_addr = htonl(INADDR_ANY);
 	server_sock.sin_port = htons(_PROT_);
 
-	/*2.调用bind函数绑定socket和地址*/
-	if(bind(sock_fd, (struct sockaddr *)&server_sock, sizeof(struct sockaddr)) == -1)
+	//调用bind函数绑定socket和地址
+	if (bind(sock_fd, (struct sockaddr *)&server_sock, sizeof(struct sockaddr)) == -1)
 	{
 		perror("bind is error\r\n");
 		exit(1);
 	}
 
-	/**
- 	* 3:调用listen函数监听(指定port监听)
-	* 通知操作系统区接受来自客户端链接请求
-	* 第二个参数：指定队列长度
-	*/
-	if(listen(sock_fd, TCP_BACKLOG) == -1)
+	//调用listen函数监听(指定port监听)
+	if (listen(sock_fd, TCP_BACKLOG) == -1)
 	{
 		perror("listen is error\r\n");
 		exit(1);
 	}
 
 	printf("start accept\n");
-
-    /**
-    * 4：调用accept函数从队列中
-    * 获得一个客户端的请求链接
-    */
-	while(1)
+	//调用accept函数从队列中
+	while (1)
 	{
 		sin_size = sizeof(struct sockaddr_in);
 
-		if((new_fd = accept(sock_fd, (struct sockaddr *)&client_sock, (socklen_t *)&sin_size)) == -1)
+		if ((new_fd[client_no] = accept(sock_fd, (struct sockaddr *)&client_sock[client_no], (socklen_t *)&sin_size)) == -1)
 		{
 			perror("accept");
 			continue;
 		}
-
-		cli_addr = malloc(sizeof(struct sockaddr));
-
+		cli_addr[client_no] = malloc(sizeof(struct sockaddr));
 		printf("accept addr\r\n");
 
-		if(cli_addr != NULL)
+		if (cli_addr != NULL)
 		{
-			memcpy(cli_addr, &client_sock, sizeof(struct sockaddr));
+			memcpy(cli_addr[client_no], &client_sock[client_no], sizeof(struct sockaddr));
 		}
+        client_no++; 
 
-		//处理目标
-		ssize_t ret;		
-
-		while(1)
-		{
-			if((ret = recv(new_fd, recvbuf, sizeof(recvbuf), 0)) == -1)
-			{
-				printf("recv error \r\n");				
-			}
-			printf("recv :%s\r\n",recvbuf);
-			sleep(2);
-			if((ret = send(new_fd, buf, strlen(buf) + 1, 0)) == -1)
-			{
-				perror("send : ");
-			}
-
-			sleep(2);
-		}	
-
-		close(new_fd);
-
+        TcpClientHandler();//服务器端多对一处理函数
 	}
 }
+
 ```
 
 ## 编译调试
